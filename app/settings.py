@@ -1,0 +1,36 @@
+"""Settings, read from environment variables (see .env.example)."""
+import os
+
+# ---- LLM ----
+LLM_PROVIDER = os.getenv("LLM_PROVIDER", "anthropic").lower()  # anthropic | openai | mock
+LLM_API_KEY = os.getenv("LLM_API_KEY", "")
+LLM_BASE_URL = os.getenv("LLM_BASE_URL", "")
+_DEFAULT_MODELS = {"anthropic": "claude-sonnet-5-5", "openai": "gpt-4o-mini", "mock": "mock"}
+LLM_MODEL = os.getenv("LLM_MODEL") or _DEFAULT_MODELS.get(LLM_PROVIDER, "")
+LLM_MAX_TOKENS = int(os.getenv("LLM_MAX_TOKENS", "1024"))
+LLM_TIMEOUT = float(os.getenv("LLM_TIMEOUT", "60"))
+
+# ---- Retrieval ----
+TOP_K = int(os.getenv("TOP_K", "5"))
+MIN_SCORE = float(os.getenv("MIN_SCORE", "0.35"))  # refusal threshold on dense cosine
+SEARCH_MODE = os.getenv("SEARCH_MODE", "hybrid").lower()  # dense | hybrid
+RERANK_CANDIDATES = int(os.getenv("RERANK_CANDIDATES", "20"))
+RERANK_MIN_SCORE = float(os.getenv("RERANK_MIN_SCORE", "0.05"))  # refusal threshold on reranker probability
+REWRITE_QUERY = os.getenv("REWRITE_QUERY", "false").lower() == "true"
+
+# ---- Downstream services ----
+QDRANT_URL = os.getenv("QDRANT_URL", "http://localhost:6333")
+QDRANT_API_KEY = os.getenv("QDRANT_API_KEY", "")
+COLLECTION = os.getenv("QDRANT_COLLECTION", "legal_docs")
+EMBEDDING_URL = os.getenv("EMBEDDING_URL", "http://localhost:8001")
+EMBEDDING_API_KEY = os.getenv("EMBEDDING_API_KEY", "")
+RERANKER_URL = os.getenv("RERANKER_URL", "")  # empty => no reranking
+RERANKER_API_KEY = os.getenv("RERANKER_API_KEY", "")
+RERANK = os.getenv("RERANK", "true").lower() == "true" and bool(RERANKER_URL)
+DOWNSTREAM_TIMEOUT = float(os.getenv("DOWNSTREAM_TIMEOUT", "30"))  # seconds per call
+RERANK_TIMEOUT = float(os.getenv("RERANK_TIMEOUT", "8"))  # reranking is optional: do not wait long for it
+WARMUP_WAIT = float(os.getenv("WARMUP_WAIT", "45"))  # keep retrying while a service wakes up from zero replicas
+
+# ---- Protection ----
+BASIC_USER = os.getenv("BASIC_USER", "")
+BASIC_PASSWORD = os.getenv("BASIC_PASSWORD", "")  # both set => every route except /health needs a login

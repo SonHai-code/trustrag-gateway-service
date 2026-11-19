@@ -1,0 +1,15 @@
+{"question": "Giảm 30% thuế thu nhập cá nhân phải nộp của kỳ tính thuế năm 2026 áp dụng cho ai?", "expected": [{"doc": "398_2026", "article": "2"}]}
+{"question": "Giảm 30% thuế thu nhập doanh nghiệp kỳ tính thuế năm 2026 áp dụng cho doanh nghiệp nào?", "expected": [{"doc": "398_2026", "article": "3"}]}
+{"question": "Nghị định giảm thuế này có hiệu lực thi hành từ khi nào?", "expected": [{"doc": "398_2026", "article": "4"}]}
+{"question": "Đối tượng áp dụng mức lương tối thiểu là ai?", "expected": [{"doc": "399_2026", "article": "2"}]}
+{"question": "Mức lương tối thiểu tháng và mức lương tối thiểu giờ theo vùng là bao nhiêu?", "expected": [{"doc": "399_2026", "article": "3"}]}
+{"question": "Mức lương tối thiểu được áp dụng như thế nào khi trả lương cho người lao động?", "expected": [{"doc": "399_2026", "article": "4"}]}
+{"question": "Những đối tượng nào bị xử phạt vi phạm hành chính trong lĩnh vực công nghiệp công nghệ số?", "expected": [{"doc": "401_2026", "article": "2"}]}
+{"question": "Có những hình thức xử phạt và biện pháp khắc phục hậu quả nào?", "expected": [{"doc": "401_2026", "article": "3"}]}
+{"question": "Thời hiệu xử phạt vi phạm hành chính là bao lâu?", "expected": [{"doc": "401_2026", "article": "5"}]}
+{"question": "Xử lý vi phạm hành chính trên môi trường điện tử được thực hiện thế nào?", "expected": [{"doc": "401_2026", "article": "6"}]}
+{"question": "Vi phạm quy định về nhân lực công nghiệp công nghệ số bị phạt thế nào?", "expected": [{"doc": "401_2026", "article": "11"}]}
+{"question": "Chủ tịch Ủy ban nhân dân cấp xã có thẩm quyền xử phạt vi phạm hành chính trong lĩnh vực này ra sao?", "expected": [{"doc": "401_2026", "article": "18"}]}
+{"question": "Giám đốc Sở Khoa học và Công nghệ có thẩm quyền xử phạt những gì?", "expected": [{"doc": "401_2026", "article": "19"}]}
+{"question": "Thủ tục đăng ký kết hôn cần những giấy tờ gì?", "expected": [], "should_refuse": true}
+{"question": "Công thức nấu phở bò truyền thống gồm những nguyên liệu nào?", "expected": [], "should_refuse": true}

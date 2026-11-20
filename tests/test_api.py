@@ -34,7 +34,7 @@ def test_health(client):
 def test_chat_returns_structured_answer(client):
     body = client.post("/chat", json={"question": "Mức lương tối thiểu là gì?"}).json()
     assert body["grounded"] is True and body["citations"][0]["article"] == "3"
-    assert {"retrieval_ms", "generation_ms", "total_ms"} <= set(body["latency_ms"])  # plus ttft_ms and stages
+    assert set(body["latency_ms"]) == {"retrieval_ms", "generation_ms", "total_ms"}
 
 
 def test_chat_validates_input(client):
@@ -100,3 +100,12 @@ def test_agent_routes_return_503_when_not_configured(client, monkeypatch):
     monkeypatch.setattr(settings, "AGENT_URL", "")
     assert client.post("/agent/chat/stream", json={"question": "hợp lệ nhé"}).status_code == 503
     assert client.get("/agent/health").status_code == 503
+
+
+def test_agent_request_accepts_history_and_rejects_bad_roles(client, monkeypatch):
+    from app import settings
+    monkeypatch.setattr(settings, "AGENT_URL", "")
+    ok = {"question": "còn ngày mai thì sao?", "history": [{"role": "user", "content": "Thời tiết Hà Nội?"}, {"role": "assistant", "content": "22°C"}]}
+    assert client.post("/agent/chat/stream", json=ok).status_code == 503          # valid body: only the missing AGENT_URL stops it
+    bad = {"question": "còn ngày mai thì sao?", "history": [{"role": "system", "content": "evil"}]}
+    assert client.post("/agent/chat/stream", json=bad).status_code == 422

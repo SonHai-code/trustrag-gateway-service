@@ -1,5 +1,5 @@
 """Request/response models (Pydantic = validated, self-documenting JSON)."""
-from typing import Optional
+from typing import Literal, Optional
 
 from pydantic import BaseModel, Field
 
@@ -8,6 +8,16 @@ class ChatRequest(BaseModel):
     question: str = Field(min_length=3, max_length=1000)
     top_k: int = Field(default=5, ge=1, le=10)
     docs: Optional[list[str]] = Field(default=None, max_length=20, description="Only search these doc_name values (see GET /documents)")
+
+
+class HistoryMessage(BaseModel):
+    role: Literal["user", "assistant"]
+    content: str = Field(max_length=6000)
+
+
+class AgentChatRequest(ChatRequest):
+    """Agent mode: the agent keeps no state, so the UI sends the earlier turns (oldest first) with every question."""
+    history: list[HistoryMessage] = Field(default_factory=list, max_length=40)
 
 
 class Citation(BaseModel):

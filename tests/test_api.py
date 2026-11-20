@@ -34,7 +34,7 @@ def test_health(client):
 def test_chat_returns_structured_answer(client):
     body = client.post("/chat", json={"question": "Mức lương tối thiểu là gì?"}).json()
     assert body["grounded"] is True and body["citations"][0]["article"] == "3"
-    assert set(body["latency_ms"]) == {"retrieval_ms", "generation_ms", "total_ms"}
+    assert {"retrieval_ms", "generation_ms", "total_ms"} <= set(body["latency_ms"])  # plus ttft_ms and stages
 
 
 def test_chat_validates_input(client):

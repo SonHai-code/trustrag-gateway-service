@@ -1,12 +1,23 @@
 """HTTP clients for the embedding and reranker services. Blocking: call from a thread (asyncio.to_thread)."""
 import logging
 import time
+from functools import lru_cache
 
 import httpx
 
 from app import settings
+from app.cache import TTLCache, normalize_query
 
 log = logging.getLogger(__name__)
+
+_query_cache = TTLCache(maxsize=settings.QUERY_CACHE_SIZE)  # embeddings of a given text never change: no TTL
+
+
+@lru_cache(maxsize=1)
+def _http() -> "httpx.Client":
+    """One shared client = keep-alive connections. A fresh httpx.post() per call pays TCP + TLS setup each time."""
+    return httpx.Client(limits=httpx.Limits(max_connections=settings.HTTP_POOL_SIZE,
+                                            max_keepalive_connections=settings.HTTP_POOL_SIZE))
 
 
 class ServiceError(RuntimeError):
@@ -20,7 +31,7 @@ def _post(name: str, base_url: str, path: str, payload: dict, api_key: str, time
     delay = 1.0
     while True:
         try:
-            r = httpx.post(f"{base_url.rstrip('/')}{path}", json=payload, headers=headers, timeout=timeout)
+            r = _http().post(f"{base_url.rstrip('/')}{path}", json=payload, headers=headers, timeout=timeout)
             if r.status_code in (502, 503, 504) and time.monotonic() < deadline:
                 time.sleep(delay)
                 delay = min(delay * 2, 8)
@@ -37,11 +48,21 @@ def _post(name: str, base_url: str, path: str, payload: dict, api_key: str, time
 
 
 def embed_query(question: str) -> tuple[list[float], tuple[list[int], list[float]]]:
-    """-> (dense vector, (sparse indices, sparse values)) for the question."""
+    """-> (dense vector, (sparse indices, sparse values)) for the question. Repeated questions are served from memory."""
+    key = normalize_query(question)
+    cached = _query_cache.get(key)
+    if cached is not None:
+        return cached
     body = _post("embedding service", settings.EMBEDDING_URL, "/embed", {"texts": [question], "kind": "query"},
                  settings.EMBEDDING_API_KEY, settings.DOWNSTREAM_TIMEOUT, settings.WARMUP_WAIT)
     s = body["sparse"][0]
-    return body["dense"][0], (s["indices"], s["values"])
+    result = (body["dense"][0], (s["indices"], s["values"]))
+    _query_cache.set(key, result)
+    return result
+
+
+def query_cache_stats() -> dict:
+    return _query_cache.stats()
 
 
 def rerank(query: str, texts: list[str]) -> list[float]:
@@ -55,7 +76,7 @@ def dependency_status() -> dict:
     """Is each downstream service ready? (None = not configured)"""
     def ready(url: str) -> bool:
         try:
-            return httpx.get(f"{url.rstrip('/')}/health/ready", timeout=3).status_code == 200
+            return _http().get(f"{url.rstrip('/')}/health/ready", timeout=3).status_code == 200
         except httpx.HTTPError:
             return False
 
@@ -63,3 +84,11 @@ def dependency_status() -> dict:
         "embedding": ready(settings.EMBEDDING_URL),
         "reranker": ready(settings.RERANKER_URL) if settings.RERANKER_URL else None,
     }
+
+
+def keep_warm() -> bool:
+    """One cheap request so the embedding service is not scaled to zero / unloaded. True if it answered."""
+    try:
+        return _http().get(f"{settings.EMBEDDING_URL.rstrip('/')}/health", timeout=5).status_code == 200
+    except httpx.HTTPError:
+        return False

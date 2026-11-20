@@ -16,7 +16,7 @@ import json
 import time
 from pathlib import Path
 
-from app import rag, retrieval, settings
+from app import clients, rag, retrieval, settings
 
 
 def percentile(values: list[float], pct: float) -> float:
@@ -123,7 +123,12 @@ def main() -> None:
     ap.add_argument("--no-rerank", dest="rerank", action="store_false")
     ap.add_argument("--matrix", action="store_true", help="run all 4 configurations")
     ap.add_argument("--out", default="eval/baseline_results.md")
+    ap.add_argument("--use-cache", action="store_true", help="keep the gateway caches on (latency numbers then reflect cache hits)")
     args = ap.parse_args()
+    if not args.use_cache:  # a cache hit would hide the very stage (embedding, search, rerank) this script measures
+        retrieval._result_cache.maxsize = 0
+        clients._query_cache.maxsize = 0
+        rag._answer_cache.maxsize = 0
 
     if args.matrix:
         configs = [("dense", False), ("hybrid", False), ("dense", True), ("hybrid", True)]

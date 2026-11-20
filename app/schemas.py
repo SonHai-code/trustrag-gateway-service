@@ -20,12 +20,15 @@ class Citation(BaseModel):
     clause: str = ""
     score: float
     snippet: str
+    text: Optional[str] = Field(default=None, description="Full chunk text; only returned by /search with include_text=true")
 
 
 class Latency(BaseModel):
     retrieval_ms: float
     generation_ms: float
     total_ms: float
+    ttft_ms: Optional[float] = Field(default=None, description="Time to first token (streaming)")
+    stages: dict[str, float] = Field(default_factory=dict, description="rewrite_ms / embed_ms / vector_ms / rerank_ms")
 
 
 class ChatResponse(BaseModel):
@@ -39,9 +42,27 @@ class ChatResponse(BaseModel):
     search_query: Optional[str] = Field(default=None, description="Rewritten query, if rewriting is on")
     latency_ms: Latency
     model: str
+    cached: bool = Field(default=False, description="True if the answer was replayed from the in-memory cache")
+
+
+class SearchRequest(ChatRequest):
+    include_text: bool = Field(default=False, description="Return the full chunk text (the agent grades on it)")
 
 
 class SearchResponse(BaseModel):
     query: str
     results: list[Citation]
     latency_ms: float
+    best_score: float = 0.0
+    sufficient: bool = Field(default=False, description="Would /chat answer this, or refuse for low retrieval score?")
+    retrieval_mode: str = ""
+    stages: dict[str, float] = Field(default_factory=dict)
+
+
+class ArticleResponse(BaseModel):
+    doc_name: str
+    doc_label: str
+    article: str
+    article_title: str = ""
+    found: bool
+    text: str = ""

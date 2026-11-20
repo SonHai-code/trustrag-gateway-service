@@ -31,6 +31,21 @@ DOWNSTREAM_TIMEOUT = float(os.getenv("DOWNSTREAM_TIMEOUT", "30"))  # seconds per
 RERANK_TIMEOUT = float(os.getenv("RERANK_TIMEOUT", "8"))  # reranking is optional: do not wait long for it
 WARMUP_WAIT = float(os.getenv("WARMUP_WAIT", "45"))  # keep retrying while a service wakes up from zero replicas
 
+# ---- Speed (see docs/LATENCY in the infra repo) ----
+QUERY_CACHE_SIZE = int(os.getenv("QUERY_CACHE_SIZE", "512"))  # query embeddings kept in memory (0 = off)
+RETRIEVAL_CACHE_SIZE = int(os.getenv("RETRIEVAL_CACHE_SIZE", "256"))  # retrieval results kept in memory (0 = off)
+RETRIEVAL_CACHE_TTL = float(os.getenv("RETRIEVAL_CACHE_TTL", "300"))  # seconds; re-ingestion becomes visible after this
+ANSWER_CACHE_TTL = float(os.getenv("ANSWER_CACHE_TTL", "0"))  # seconds a finished answer is replayed (0 = off)
+ANSWER_CACHE_SIZE = int(os.getenv("ANSWER_CACHE_SIZE", "128"))
+KEEPWARM_SECONDS = float(os.getenv("KEEPWARM_SECONDS", "0"))  # >0: ping the embedding service this often (0 = off)
+HTTP_POOL_SIZE = int(os.getenv("HTTP_POOL_SIZE", "20"))  # keep-alive connections to embedding/reranker
+
+# ---- Agent (Phase 4) ----
+AGENT_URL = os.getenv("AGENT_URL", "")  # e.g. http://trustrag-agent ; empty = /agent/* returns 503
+AGENT_API_KEY = os.getenv("AGENT_API_KEY", "")  # sent to the agent service as X-API-Key
+AGENT_TIMEOUT = float(os.getenv("AGENT_TIMEOUT", "120"))
+
 # ---- Protection ----
+INTERNAL_API_KEY = os.getenv("INTERNAL_API_KEY", "")  # services (MCP server, agent) send it as X-API-Key instead of the Basic login
 BASIC_USER = os.getenv("BASIC_USER", "")
 BASIC_PASSWORD = os.getenv("BASIC_PASSWORD", "")  # both set => every route except /health needs a login

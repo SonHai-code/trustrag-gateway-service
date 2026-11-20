@@ -97,3 +97,46 @@ def test_reranked_hits_use_rerank_threshold(monkeypatch):
     monkeypatch.setattr(settings, "MIN_SCORE", 0.35)
     assert not rag._should_refuse([Hit(score=0.2, payload={}, rerank=0.2)])
     assert rag._should_refuse([Hit(score=0.01, payload={}, rerank=0.01)])
+
+
+def test_timings_and_result_cache(faked, monkeypatch):
+    retrieval.clear_caches()
+    monkeypatch.setattr(retrieval._result_cache, "maxsize", 10)
+    t1, t2 = {}, {}
+    first = retrieval.retrieve("mức lương tối thiểu", top_k=5, timings=t1)
+    assert {"embed_ms", "vector_ms"} <= set(t1) and "cache" not in t1
+    n_calls = len(faked)
+    second = retrieval.retrieve("Mức lương tối thiểu?", top_k=5, timings=t2)
+    assert t2 == {"cache": True} and len(faked) == n_calls  # no new Qdrant queries
+    assert [h.payload["article"] for h in first] == [h.payload["article"] for h in second]
+
+
+def test_cache_key_separates_filters_and_top_k(faked, monkeypatch):
+    retrieval.clear_caches()
+    monkeypatch.setattr(retrieval._result_cache, "maxsize", 10)
+    monkeypatch.setattr(retrieval, "_build_filter", lambda docs: tuple(docs) if docs else None)  # no qdrant_client here
+    retrieval.retrieve("câu hỏi", top_k=5)
+    before = len(faked)
+    retrieval.retrieve("câu hỏi", top_k=5, docs=["399_2026"])  # different filter: must search again
+    assert len(faked) > before
+
+
+def test_dense_and_bm25_searches_both_run(faked, monkeypatch):
+    retrieval.clear_caches()
+    monkeypatch.setattr(retrieval._result_cache, "maxsize", 0)
+    retrieval.retrieve("lương", top_k=3)
+    assert sorted(u for u, _ in faked) == ["bm25", "dense"]
+
+
+def test_a_failing_search_becomes_a_retrieval_error(monkeypatch):
+    retrieval.clear_caches()
+    monkeypatch.setattr(retrieval._result_cache, "maxsize", 0)
+    monkeypatch.setattr(settings, "RERANK", False)
+    monkeypatch.setattr(retrieval, "_encode_query", lambda q: ([0.0], ([1], [1.0])))
+
+    def boom(*a, **k):
+        raise ConnectionError("qdrant down")
+
+    monkeypatch.setattr(retrieval, "_query", boom)
+    with pytest.raises(retrieval.RetrievalError, match="Qdrant"):
+        retrieval.retrieve("câu hỏi")

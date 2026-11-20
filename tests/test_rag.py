@@ -22,7 +22,7 @@ def _setup(monkeypatch):
 
 
 def _patch(monkeypatch, hits, text="Mức lương là X [1]. Thêm ý [2]."):
-    async def fake_retrieve(question, top_k, docs=None):
+    async def fake_retrieve(question, top_k, docs=None, timings=None):
         return hits
 
     async def fake_generate(system, user):
@@ -82,3 +82,53 @@ def test_stream_event_order(monkeypatch):
 
     names = asyncio.run(collect())
     assert names[0] == "sources" and names[-1] == "done" and names.count("token") == 2
+
+
+def test_stages_and_ttft_are_reported(monkeypatch):
+    _patch(monkeypatch, [_hit(0.9)])
+
+    async def timed_retrieve(question, top_k, docs=None, timings=None):
+        timings.update({"embed_ms": 12.0, "vector_ms": 7.5, "cache": True})  # non-numbers are dropped
+        return [_hit(0.9)]
+
+    async def fake_stream(system, user):
+        yield "Đáp án [1]."
+
+    monkeypatch.setattr(rag, "retrieve_hits", timed_retrieve)
+    monkeypatch.setattr(llm, "stream", fake_stream)
+
+    async def last_done():
+        return [d async for n, d in rag.answer_stream("câu hỏi") if n == "done"][-1]
+
+    done = asyncio.run(last_done())
+    assert done["latency_ms"]["stages"] == {"embed_ms": 12.0, "vector_ms": 7.5}
+    assert done["latency_ms"]["ttft_ms"] is not None
+
+
+def test_answer_cache_replays_grounded_answers_without_retrieval_or_llm(monkeypatch):
+    monkeypatch.setattr(rag._answer_cache, "maxsize", 10)
+    rag._answer_cache.clear()
+    _patch(monkeypatch, [_hit(0.9)], "Đáp án [1].")
+    first = asyncio.run(rag.answer("mức lương tối thiểu?"))
+    assert first.grounded and not first.cached
+
+    async def boom(*a, **k):
+        raise AssertionError("must be served from the cache")
+
+    monkeypatch.setattr(rag, "retrieve_hits", boom)
+    monkeypatch.setattr(llm, "generate", boom)
+    second = asyncio.run(rag.answer("Mức lương tối thiểu"))
+    assert second.cached and second.answer == first.answer and second.citations[0].article == "3"
+
+    async def replay_events():
+        return [n async for n, _ in rag.answer_stream("mức lương tối thiểu?")]
+
+    assert asyncio.run(replay_events()) == ["sources", "token", "done"]
+
+
+def test_refusals_are_never_cached(monkeypatch):
+    monkeypatch.setattr(rag._answer_cache, "maxsize", 10)
+    rag._answer_cache.clear()
+    _patch(monkeypatch, [_hit(0.1)])
+    asyncio.run(rag.answer("ngoài phạm vi"))
+    assert len(rag._answer_cache) == 0

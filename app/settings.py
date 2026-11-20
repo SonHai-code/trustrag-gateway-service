@@ -9,6 +9,8 @@ _DEFAULT_MODELS = {"anthropic": "claude-sonnet-5-5", "openai": "gpt-4o-mini", "m
 LLM_MODEL = os.getenv("LLM_MODEL") or _DEFAULT_MODELS.get(LLM_PROVIDER, "")
 LLM_MAX_TOKENS = int(os.getenv("LLM_MAX_TOKENS", "1024"))
 LLM_TIMEOUT = float(os.getenv("LLM_TIMEOUT", "60"))
+# JSON merged into every OpenAI-compatible request body (vLLM extras), e.g. {"chat_template_kwargs": {"enable_thinking": false}}
+LLM_EXTRA_BODY = os.getenv("LLM_EXTRA_BODY", "")
 
 # ---- Retrieval ----
 TOP_K = int(os.getenv("TOP_K", "5"))

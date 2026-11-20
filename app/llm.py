@@ -55,6 +55,12 @@ def _request(system: str, user: str, stream: bool) -> tuple[str, dict, dict]:
             "messages": [{"role": "system", "content": system}, {"role": "user", "content": user}],
             "stream": stream,
         }
+        if settings.LLM_EXTRA_BODY:  # vLLM / OpenAI-compatible extras; a bad value must not take the service down
+            try:
+                extra = json.loads(settings.LLM_EXTRA_BODY)
+                body.update(extra if isinstance(extra, dict) else {})
+            except json.JSONDecodeError:
+                pass
     return url, headers, body
 
 

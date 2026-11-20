@@ -22,6 +22,7 @@ def faked(monkeypatch):
     monkeypatch.setattr(settings, "SEARCH_MODE", "hybrid")
     monkeypatch.setattr(settings, "RERANK", False)
     monkeypatch.setattr(retrieval, "_encode_query", lambda q: ([0.0], ([1, 2], [1.0, 1.0])))
+    retrieval.clear_caches()  # also closes the reranker circuit breaker
     calls = []
 
     def fake_query(using, vector, limit, flt):
@@ -69,6 +70,31 @@ def test_reranker_outage_degrades_to_unreranked_results(faked, monkeypatch):
     hits = retrieval.retrieve("mức lương", top_k=3, rerank=True)
     assert len(hits) == 3 and all(h.rerank is None for h in hits)
     assert not rag._should_refuse([h for h in hits if h.dense and h.dense > 0.5])  # gate falls back to MIN_SCORE
+
+
+def test_after_a_reranker_failure_it_is_skipped_for_a_while_and_degraded_results_are_not_cached(faked, monkeypatch):
+    now, attempts = [100.0], []
+    monkeypatch.setattr(retrieval.time, "monotonic", lambda: now[0])
+    monkeypatch.setattr(settings, "RERANK_COOLDOWN", 60)
+
+    def down(q, texts):
+        attempts.append(q)
+        raise clients.ServiceError("reranker service unreachable: timed out")
+
+    monkeypatch.setattr(retrieval, "_rerank_scores", down)
+    t1, t2 = {}, {}
+    retrieval.retrieve("mức lương", top_k=3, rerank=True, timings=t1)
+    retrieval.retrieve("điều kiện khác", top_k=3, rerank=True, timings=t2)
+    assert attempts == ["mức lương"] and t2.get("rerank_skipped")             # the second search did not wait for it
+    retrieval.retrieve("mức lương", top_k=3, rerank=True, timings=(t3 := {}))
+    assert not t3.get("cache")                                                  # the degraded result was not cached
+
+    now[0] = 161.0                                                             # cooldown over: try again, and it works
+    monkeypatch.setattr(retrieval, "_rerank_scores", lambda q, texts: [0.9, 0.5, 0.1][: len(texts)])
+    hits = retrieval.retrieve("mức lương", top_k=3, rerank=True)
+    assert hits[0].rerank == 0.9
+    retrieval.retrieve("mức lương", top_k=3, rerank=True, timings=(t4 := {}))
+    assert t4.get("cache")                                                      # a healthy result is cached
 
 
 def test_embedding_outage_is_a_retrieval_error(monkeypatch):

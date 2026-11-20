@@ -31,7 +31,9 @@ def cache_stats() -> dict:
 
 
 def clear_caches() -> None:
+    global _rerank_down_until
     _result_cache.clear()
+    _rerank_down_until = 0.0
 
 
 def _ms(t0: float) -> float:
@@ -102,6 +104,9 @@ def _fuse(dense_points, sparse_points, hybrid: bool) -> list[Hit]:
     return [Hit(score=dense.get(pid, 0.0), payload=payloads[pid], dense=dense.get(pid), rrf=rrf) for pid, rrf in order]
 
 
+_rerank_down_until = 0.0  # circuit breaker: monotonic time until which the reranker is skipped after a failure
+
+
 def _apply_rerank(question: str, hits: list[Hit]) -> list[Hit]:
     scores = _rerank_scores(question, [h.payload.get("text", "") for h in hits])
     for h, s in zip(hits, scores):
@@ -142,15 +147,24 @@ def retrieve(question: str, top_k: int = 5, docs: list[str] | None = None,
     except Exception as exc:
         raise RetrievalError(f"Qdrant unavailable or collection missing/outdated (re-run ingestion): {exc}") from exc
     hits = _fuse(dense_points, sparse_points, hybrid)
+    degraded = False
     if do_rerank and hits:
+        global _rerank_down_until
         t = time.perf_counter()
-        try:
-            hits = _apply_rerank(question, hits[:pool])
-        except Exception as exc:  # degrade, do not fail the request
-            log.warning("reranker unavailable, returning un-reranked results: %s", exc)
+        if time.monotonic() < _rerank_down_until:  # it failed a moment ago: do not make every search wait for it again
+            degraded, timings["rerank_skipped"] = True, True
+        else:
+            try:
+                hits = _apply_rerank(question, hits[:pool])
+            except Exception as exc:  # degrade, do not fail the request
+                _rerank_down_until = time.monotonic() + settings.RERANK_COOLDOWN
+                degraded = True
+                log.warning("reranker unavailable, returning un-reranked results (skipping it for %.0fs): %s",
+                            settings.RERANK_COOLDOWN, exc)
         timings["rerank_ms"] = _ms(t)
     result = hits[:top_k]
-    _result_cache.set(key, list(result))
+    if not degraded:  # never cache a degraded ordering: the next search may have the reranker back
+        _result_cache.set(key, list(result))
     return result
 
 

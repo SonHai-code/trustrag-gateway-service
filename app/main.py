@@ -67,7 +67,8 @@ async def basic_auth(request: Request, call_next):
 
 
 @app.exception_handler(RetrievalError)
-async def _retrieval_error(_, exc: RetrievalError):
+async def _retrieval_error(request, exc: RetrievalError):
+    log.error("retrieval failed on %s: %s", request.url.path, exc)
     return JSONResponse(status_code=503, content={"detail": str(exc)})
 
 
@@ -157,6 +158,7 @@ async def chat_stream(req: ChatRequest):
             async for name, data in rag.answer_stream(req.question, req.top_k, req.docs):
                 yield _sse(name, data)
         except (RetrievalError, LLMError) as exc:  # headers are already sent: report in-band
+            log.error("stream failed: %s", exc)
             yield _sse("error", {"detail": str(exc)})
 
     return StreamingResponse(

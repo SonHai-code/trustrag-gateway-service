@@ -28,6 +28,7 @@ RERANKER_URL = os.getenv("RERANKER_URL", "")  # empty => no reranking
 RERANKER_API_KEY = os.getenv("RERANKER_API_KEY", "")
 RERANK = os.getenv("RERANK", "true").lower() == "true" and bool(RERANKER_URL)
 DOWNSTREAM_TIMEOUT = float(os.getenv("DOWNSTREAM_TIMEOUT", "30"))  # seconds per call
+RERANK_COOLDOWN = float(os.getenv("RERANK_COOLDOWN", "60"))  # after a reranker failure, skip it this many seconds (no 8 s wait per search)
 RERANK_TIMEOUT = float(os.getenv("RERANK_TIMEOUT", "8"))  # reranking is optional: do not wait long for it
 WARMUP_WAIT = float(os.getenv("WARMUP_WAIT", "45"))  # keep retrying while a service wakes up from zero replicas
 

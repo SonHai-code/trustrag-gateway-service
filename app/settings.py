@@ -51,6 +51,18 @@ AGENT_URL = os.getenv("AGENT_URL", "")  # e.g. http://trustrag-agent ; empty = /
 AGENT_API_KEY = os.getenv("AGENT_API_KEY", "")  # sent to the agent service as X-API-Key
 AGENT_TIMEOUT = float(os.getenv("AGENT_TIMEOUT", "120"))
 
+# ---- Accounts (trustrag-user-service) ----
+AUTH_REQUIRED = os.getenv("AUTH_REQUIRED", "false").lower() == "true"  # true => every route needs a valid access token
+JWT_SECRET = os.getenv("JWT_SECRET", "")  # the SAME value as the user service (>= 32 chars)
+JWT_ISSUER = os.getenv("JWT_ISSUER", "trustrag-user")
+JWT_AUDIENCE = os.getenv("JWT_AUDIENCE", "trustrag")
+USER_SERVICE_URL = os.getenv("USER_SERVICE_URL", "")  # e.g. http://trustrag-user ; empty => /auth, /users, /conversations return 503
+USER_API_KEY = os.getenv("USER_API_KEY", "")  # sent to the user service as X-API-Key
+USER_TIMEOUT = float(os.getenv("USER_TIMEOUT", "20"))
+TRUSTED_PROXY_HOPS = int(os.getenv("TRUSTED_PROXY_HOPS", "2"))  # proxies in front of the gateway that append to X-Forwarded-For
+RATE_LIMIT_PER_MIN = int(os.getenv("RATE_LIMIT_PER_MIN", "20"))  # LLM requests per user per minute (0 = unlimited)
+RATE_LIMIT_PER_DAY = int(os.getenv("RATE_LIMIT_PER_DAY", "0"))  # LLM requests per user per day (0 = unlimited): a cost ceiling
+
 # ---- Protection ----
 INTERNAL_API_KEY = os.getenv("INTERNAL_API_KEY", "")  # services (MCP server, agent) send it as X-API-Key instead of the Basic login
 BASIC_USER = os.getenv("BASIC_USER", "")

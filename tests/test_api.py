@@ -8,7 +8,7 @@ os.environ["LLM_PROVIDER"] = "mock"
 
 from fastapi.testclient import TestClient  # noqa: E402
 
-from app import rag, settings  # noqa: E402
+from app import models, rag, settings  # noqa: E402
 from app.main import app  # noqa: E402
 from app.retrieval import Hit  # noqa: E402
 
@@ -16,6 +16,8 @@ from app.retrieval import Hit  # noqa: E402
 @pytest.fixture()
 def client(monkeypatch):
     monkeypatch.setattr(settings, "LLM_PROVIDER", "mock")
+    monkeypatch.setattr(settings, "LLM_MODELS", "")
+    models.reset()
 
     async def fake_retrieve(question, top_k, docs=None, timings=None):
         if timings is not None:
@@ -110,3 +112,24 @@ def test_agent_request_accepts_history_and_rejects_bad_roles(client, monkeypatch
     assert client.post("/agent/chat/stream", json=ok).status_code == 503          # valid body: only the missing AGENT_URL stops it
     bad = {"question": "còn ngày mai thì sao?", "history": [{"role": "system", "content": "evil"}]}
     assert client.post("/agent/chat/stream", json=bad).status_code == 422
+
+
+def test_models_endpoint_lists_choices_without_secrets(client, monkeypatch):
+    import json
+    monkeypatch.setattr(settings, "LLM_MODELS", json.dumps([
+        {"id": "a", "provider": "mock", "model": "mock"},
+        {"id": "b", "provider": "mock", "model": "mock", "base_url": "https://secret.example/v1", "api_key_env": "SECRET_ENV"}]))
+    models.reset()
+    body = client.get("/models").json()
+    assert body["default"] == "a" and [m["id"] for m in body["models"]] == ["a", "b"]
+    assert "secret.example" not in str(body) and "SECRET_ENV" not in str(body)
+
+
+def test_unknown_model_is_a_clean_400_for_chat_and_streams(client, monkeypatch):
+    monkeypatch.setattr(settings, "LLM_MODELS", '[{"id": "a", "provider": "mock", "model": "mock"}]')
+    models.reset()
+    for path in ("/chat", "/chat/stream", "/agent/chat/stream"):
+        r = client.post(path, json={"question": "Mức lương tối thiểu?", "model": "nope"})
+        assert r.status_code == 400 and "Unknown model" in r.json()["detail"], path
+    ok = client.post("/chat", json={"question": "Mức lương tối thiểu?", "model": "a"})
+    assert ok.status_code == 200 and ok.json()["model"] == "mock"

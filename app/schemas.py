@@ -5,6 +5,7 @@ from pydantic import BaseModel, Field
 
 
 class ChatRequest(BaseModel):
+    model: Optional[str] = Field(default=None, max_length=80, description="Model id from GET /models; empty = the default model")
     question: str = Field(min_length=3, max_length=1000)
     top_k: int = Field(default=5, ge=1, le=10)
     docs: Optional[list[str]] = Field(default=None, max_length=20, description="Only search these doc_name values (see GET /documents)")

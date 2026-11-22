@@ -3,7 +3,7 @@ import asyncio
 
 import pytest
 
-from app import llm, rag, settings
+from app import llm, models, rag, settings
 from app.prompts import NO_ANSWER
 from app.retrieval import Hit
 
@@ -19,13 +19,15 @@ def _hit(score, article="3", doc="399_2026_ND-CP_731671", title="Mức lương t
 def _setup(monkeypatch):
     monkeypatch.setattr(settings, "MIN_SCORE", 0.35)
     monkeypatch.setattr(settings, "LLM_PROVIDER", "mock")
+    monkeypatch.setattr(settings, "LLM_MODELS", "")
+    models.reset()
 
 
 def _patch(monkeypatch, hits, text="Mức lương là X [1]. Thêm ý [2]."):
     async def fake_retrieve(question, top_k, docs=None, timings=None):
         return hits
 
-    async def fake_generate(system, user):
+    async def fake_generate(system, user, spec=None):
         return text
 
     monkeypatch.setattr(rag, "retrieve_hits", fake_retrieve)
@@ -47,7 +49,7 @@ def test_grounded_answer_returns_only_cited_sources(monkeypatch):
 def test_refuses_below_threshold_without_calling_llm(monkeypatch):
     _patch(monkeypatch, [_hit(0.2)])
 
-    async def boom(system, user):
+    async def boom(*a, **k):
         raise AssertionError("LLM must not be called")
 
     monkeypatch.setattr(llm, "generate", boom)
@@ -71,7 +73,7 @@ def test_answer_without_markers_is_flagged_ungrounded(monkeypatch):
 def test_stream_event_order(monkeypatch):
     _patch(monkeypatch, [_hit(0.9)])
 
-    async def fake_stream(system, user):
+    async def fake_stream(system, user, spec=None):
         for piece in ["Đáp ", "án [1]."]:
             yield piece
 
@@ -91,7 +93,7 @@ def test_stages_and_ttft_are_reported(monkeypatch):
         timings.update({"embed_ms": 12.0, "vector_ms": 7.5, "cache": True})  # non-numbers are dropped
         return [_hit(0.9)]
 
-    async def fake_stream(system, user):
+    async def fake_stream(system, user, spec=None):
         yield "Đáp án [1]."
 
     monkeypatch.setattr(rag, "retrieve_hits", timed_retrieve)

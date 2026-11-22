@@ -7,7 +7,7 @@ import re
 import time
 from typing import AsyncIterator
 
-from app import llm, settings
+from app import llm, models, settings
 from app.cache import TTLCache, normalize_query
 from app.prompts import NO_ANSWER, REWRITE_PROMPT, SYSTEM_PROMPT, build_user_prompt, doc_label
 from app.schemas import ChatResponse, Citation, Latency
@@ -19,8 +19,8 @@ if settings.ANSWER_CACHE_TTL <= 0:
     _answer_cache.maxsize = 0  # off by default: a cached answer must never outlive a re-ingestion unnoticed
 
 
-def _answer_key(question: str, top_k: int, docs: list[str] | None) -> tuple:
-    return (normalize_query(question), top_k, tuple(sorted(docs or [])), settings.LLM_MODEL, settings.SEARCH_MODE)
+def _answer_key(question: str, top_k: int, docs: list[str] | None, model: str = "") -> tuple:
+    return (normalize_query(question), top_k, tuple(sorted(docs or [])), model, settings.SEARCH_MODE)
 
 
 async def retrieve_hits(question: str, top_k: int, docs: list[str] | None = None, timings: dict | None = None):
@@ -28,12 +28,12 @@ async def retrieve_hits(question: str, top_k: int, docs: list[str] | None = None
     return await asyncio.to_thread(retrieve, question, top_k, docs, None, None, timings)
 
 
-async def maybe_rewrite(question: str) -> str:
+async def maybe_rewrite(question: str, spec=None) -> str:
     """Optional: let the LLM turn a chatty question into a tight search query. Falls back silently."""
-    if not settings.REWRITE_QUERY or settings.LLM_PROVIDER == "mock":
+    if not settings.REWRITE_QUERY or (spec or models.resolve(None)).provider == "mock":
         return question
     try:
-        text = (await llm.generate(REWRITE_PROMPT, question)).strip().strip('"')
+        text = (await llm.generate(REWRITE_PROMPT, question, spec)).strip().strip('"')
     except llm.LLMError:
         return question
     return text[:300] if text else question
@@ -93,12 +93,12 @@ def _should_refuse(hits) -> bool:
 
 
 def _refusal(hits, reason: str, t_start: float, t_ret: float, search_query: str | None,
-             stages: dict | None = None) -> ChatResponse:
+             stages: dict | None = None, model: str = "") -> ChatResponse:
     return ChatResponse(
         answer=NO_ANSWER, grounded=False, confidence=_confidence(hits), citations=[],
         retrieved=len(hits), refusal_reason=reason, retrieval_mode=_mode_label(hits), search_query=search_query,
         latency_ms=Latency(retrieval_ms=t_ret, generation_ms=0.0, total_ms=_ms(t_start), stages=_clean(stages)),
-        model=settings.LLM_MODEL,
+        model=model,
     )
 
 
@@ -107,7 +107,7 @@ def _clean(stages: dict | None) -> dict[str, float]:
 
 
 def _finalize(answer: str, hits, t_start: float, t_ret: float, t_gen: float, search_query: str | None,
-              stages: dict | None = None, ttft: float | None = None) -> ChatResponse:
+              stages: dict | None = None, ttft: float | None = None, model: str = "") -> ChatResponse:
     answer = answer.strip()
     refused = NO_ANSWER in answer
     cited = [] if refused else extract_cited_ids(answer, len(hits))
@@ -118,7 +118,7 @@ def _finalize(answer: str, hits, t_start: float, t_ret: float, t_gen: float, sea
         retrieval_mode=_mode_label(hits), search_query=search_query,
         latency_ms=Latency(retrieval_ms=t_ret, generation_ms=t_gen, total_ms=_ms(t_start), ttft_ms=ttft,
                            stages=_clean(stages)),
-        model=settings.LLM_MODEL,
+        model=model,
     )
 
 
@@ -134,36 +134,38 @@ def _remember(key: tuple, res: ChatResponse) -> None:
         _answer_cache.set(key, res.model_dump())
 
 
-async def answer(question: str, top_k: int | None = None, docs: list[str] | None = None) -> ChatResponse:
+async def answer(question: str, top_k: int | None = None, docs: list[str] | None = None, model: str | None = None) -> ChatResponse:
+    spec = models.resolve(model)  # unknown id -> ModelConfigError (the API turns it into a 400)
     top_k = top_k or settings.TOP_K
     t0 = time.perf_counter()
-    key = _answer_key(question, top_k, docs)
+    key = _answer_key(question, top_k, docs, spec.model)
     cached = _answer_cache.get(key)
     if cached is not None:
         return _replay(cached, t0)
     stages: dict = {}
     t = time.perf_counter()
-    search_query = await maybe_rewrite(question)
+    search_query = await maybe_rewrite(question, spec)
     if search_query != question:
         stages["rewrite_ms"] = _ms(t)
     shown_query = search_query if search_query != question else None
     hits = await retrieve_hits(search_query, top_k, docs, stages)
     t_ret = _ms(t0)
     if _should_refuse(hits):
-        return _refusal(hits, "low_retrieval_score", t0, t_ret, shown_query, stages)
+        return _refusal(hits, "low_retrieval_score", t0, t_ret, shown_query, stages, spec.model)
     t1 = time.perf_counter()
-    text = await llm.generate(SYSTEM_PROMPT, build_user_prompt(question, hits))
-    res = _finalize(text, hits, t0, t_ret, _ms(t1), shown_query, stages)
+    text = await llm.generate(SYSTEM_PROMPT, build_user_prompt(question, hits), spec)
+    res = _finalize(text, hits, t0, t_ret, _ms(t1), shown_query, stages, model=spec.model)
     _remember(key, res)
     return res
 
 
-async def answer_stream(question: str, top_k: int | None = None,
-                        docs: list[str] | None = None) -> AsyncIterator[tuple[str, dict]]:
+async def answer_stream(question: str, top_k: int | None = None, docs: list[str] | None = None,
+                        model: str | None = None) -> AsyncIterator[tuple[str, dict]]:
     """Yields (event_name, data): sources -> token* -> done."""
+    spec = models.resolve(model)
     top_k = top_k or settings.TOP_K
     t0 = time.perf_counter()
-    key = _answer_key(question, top_k, docs)
+    key = _answer_key(question, top_k, docs, spec.model)
     cached = _answer_cache.get(key)
     if cached is not None:
         res = _replay(cached, t0)
@@ -173,7 +175,7 @@ async def answer_stream(question: str, top_k: int | None = None,
         return
     stages: dict = {}
     t = time.perf_counter()
-    search_query = await maybe_rewrite(question)
+    search_query = await maybe_rewrite(question, spec)
     if search_query != question:
         stages["rewrite_ms"] = _ms(t)
     shown_query = search_query if search_query != question else None
@@ -182,17 +184,17 @@ async def answer_stream(question: str, top_k: int | None = None,
     if _should_refuse(hits):
         yield "sources", {"sources": []}
         yield "token", {"text": NO_ANSWER}
-        yield "done", _refusal(hits, "low_retrieval_score", t0, t_ret, shown_query, stages).model_dump()
+        yield "done", _refusal(hits, "low_retrieval_score", t0, t_ret, shown_query, stages, spec.model).model_dump()
         return
     yield "sources", {"sources": [to_citation(i, h).model_dump() for i, h in enumerate(hits, 1)]}
     t1 = time.perf_counter()
     parts: list[str] = []
     ttft: float | None = None
-    async for piece in llm.stream(SYSTEM_PROMPT, build_user_prompt(question, hits)):
+    async for piece in llm.stream(SYSTEM_PROMPT, build_user_prompt(question, hits), spec):
         if ttft is None:
             ttft = _ms(t0)
         parts.append(piece)
         yield "token", {"text": piece}
-    res = _finalize("".join(parts), hits, t0, t_ret, _ms(t1), shown_query, stages, ttft)
+    res = _finalize("".join(parts), hits, t0, t_ret, _ms(t1), shown_query, stages, ttft, spec.model)
     _remember(key, res)
     yield "done", res.model_dump()

@@ -9,6 +9,9 @@ _DEFAULT_MODELS = {"anthropic": "claude-sonnet-5-5", "openai": "gpt-4o-mini", "m
 LLM_MODEL = os.getenv("LLM_MODEL") or _DEFAULT_MODELS.get(LLM_PROVIDER, "")
 LLM_MAX_TOKENS = int(os.getenv("LLM_MAX_TOKENS", "1024"))
 LLM_TIMEOUT = float(os.getenv("LLM_TIMEOUT", "60"))
+# Several selectable models (see app/models.py): a JSON list. Empty = the single model defined by the LLM_* settings above.
+LLM_MODELS = os.getenv("LLM_MODELS", "")
+LLM_DEFAULT_MODEL = os.getenv("LLM_DEFAULT_MODEL", "")   # id from LLM_MODELS used when the client does not choose
 # JSON merged into every OpenAI-compatible request body (vLLM extras), e.g. {"chat_template_kwargs": {"enable_thinking": false}}
 LLM_EXTRA_BODY = os.getenv("LLM_EXTRA_BODY", "")
 

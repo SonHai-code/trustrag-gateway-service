@@ -11,7 +11,7 @@ import httpx
 from fastapi import FastAPI, Request, Response
 from fastapi.responses import JSONResponse, StreamingResponse
 
-from app import rag, settings
+from app import models, rag, settings
 from app.llm import LLMConfigError, LLMError
 from app.prompts import doc_label
 from app.retrieval import RetrievalError
@@ -81,9 +81,21 @@ async def _llm_error(_, exc: LLMError):
     return JSONResponse(status_code=502, content={"detail": str(exc)})
 
 
+@app.exception_handler(models.ModelConfigError)
+async def _model_error(_, exc: models.ModelConfigError):
+    return JSONResponse(status_code=400, content={"detail": str(exc)})
+
+
+@app.get("/models")
+async def list_models():
+    """The models a user may choose (ids and labels only: never URLs or keys). The same ids are accepted by /chat and /agent/*."""
+    return {"default": models.default_id(), "models": models.public_list()}
+
+
 @app.get("/health")
 async def health():
-    return {"status": "ok", "llm_provider": settings.LLM_PROVIDER, "model": settings.LLM_MODEL}
+    spec = models.resolve(None)
+    return {"status": "ok", "llm_provider": spec.provider, "model": spec.model, "models": len(models.registry())}
 
 
 @app.get("/health/ready")
@@ -143,7 +155,7 @@ async def cache_stats():
 
 @app.post("/chat", response_model=ChatResponse)
 async def chat(req: ChatRequest):
-    return await rag.answer(req.question, req.top_k, req.docs)
+    return await rag.answer(req.question, req.top_k, req.docs, req.model)
 
 
 def _sse(event: str, data: dict) -> str:
@@ -152,9 +164,10 @@ def _sse(event: str, data: dict) -> str:
 
 @app.post("/chat/stream")
 async def chat_stream(req: ChatRequest):
+    models.resolve(req.model)  # refuse an unknown model with a clean 400 before any streaming starts
     async def events():
         try:
-            async for name, data in rag.answer_stream(req.question, req.top_k, req.docs):
+            async for name, data in rag.answer_stream(req.question, req.top_k, req.docs, req.model):
                 yield _sse(name, data)
         except (RetrievalError, LLMError) as exc:  # headers are already sent: report in-band
             yield _sse("error", {"detail": str(exc)})
@@ -187,6 +200,7 @@ async def _agent_stream(path: str, body: bytes):
 
 @app.post("/agent/chat/stream")
 async def agent_chat_stream(req: AgentChatRequest):
+    models.resolve(req.model)  # the same allow-list: the browser can only name a model, never an endpoint or a key
     if not settings.AGENT_URL:
         return JSONResponse(status_code=503, content={"detail": "Agent service is not configured (set AGENT_URL)."})
     return StreamingResponse(

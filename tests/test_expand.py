@@ -131,3 +131,9 @@ def test_join_continuation_without_overlap_adds_no_line_break():
     b = _part(1, " và câu ba.", 2)
     b["cont"] = True
     assert join_article([a, b])[0] == f"{HEADER}\nCâu một. Câu hai và câu ba."
+
+
+def test_points_without_part_are_ordered_by_clause_and_none_dropped():
+    old = [{"clause": "10", "text": "Điều 3. T\nK10"}, {"clause": "2", "text": "Điều 3. T\nK2"}, {"clause": "1", "text": "Điều 3. T\nK1"}]
+    text, _ = join_article(old)
+    assert text.index("K1") < text.index("K2") < text.index("K10")

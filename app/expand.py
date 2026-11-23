@@ -24,7 +24,10 @@ def _num(value, default=0) -> int:
 
 
 def ordered(payloads: list[dict]) -> list[dict]:
-    """Parts in reading order, one per `part` number (a re-ingestion race could leave duplicates)."""
+    """Parts in reading order, one per `part` number (a re-ingestion race could leave duplicates).
+    Points without `part` (very old index) are ordered by their clause number instead."""
+    if any("part" not in p for p in payloads):
+        return sorted(payloads, key=lambda p: _num(p.get("clause"), 10**6))
     seen: dict[int, dict] = {}
     for p in sorted(payloads, key=lambda p: _num(p.get("part"))):
         seen.setdefault(_num(p.get("part")), p)

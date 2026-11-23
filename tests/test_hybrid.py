@@ -39,7 +39,7 @@ def test_hybrid_merges_both_searches_and_keeps_keyword_only_hits(faked):
     hits = retrieval.retrieve("mức lương tối thiểu", top_k=5)
     assert {h.payload["article"] for h in hits} == {"1", "2", "3"}
     assert hits[0].payload["article"] == "2"  # found by both retrievers
-    assert [c[0] for c in faked] == ["dense", "bm25"]
+    assert sorted(c[0] for c in faked) == ["bm25", "dense"]  # the two searches run in parallel: order is not guaranteed
     keyword_only = next(h for h in hits if h.payload["article"] == "3")
     assert keyword_only.score == 0.0 and keyword_only.dense is None
 

@@ -67,3 +67,8 @@ RATE_LIMIT_PER_DAY = int(os.getenv("RATE_LIMIT_PER_DAY", "0"))  # LLM requests p
 INTERNAL_API_KEY = os.getenv("INTERNAL_API_KEY", "")  # services (MCP server, agent) send it as X-API-Key instead of the Basic login
 BASIC_USER = os.getenv("BASIC_USER", "")
 BASIC_PASSWORD = os.getenv("BASIC_PASSWORD", "")  # both set => every route except /health needs a login
+
+# Small-to-big: search finds a small chunk, the LLM gets the whole Điều (needs a re-ingestion with the new chunker)
+EXPAND_ARTICLES = os.getenv("EXPAND_ARTICLES", "true").lower() == "true"
+EXPAND_MAX_CHARS = int(os.getenv("EXPAND_MAX_CHARS", "6000"))         # per Điều; longer ones are cut around the matched part
+EXPAND_TOTAL_CHARS = int(os.getenv("EXPAND_TOTAL_CHARS", "16000"))    # all expanded Điều together (keeps the prompt bounded)

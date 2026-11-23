@@ -188,10 +188,10 @@ async def search(req: SearchRequest):
 async def article(doc_name: str, article: str):
     """Exact lookup of 'Điều <article>' in one document (no embedding, ~ms). Lets the agent answer
     questions that name the article directly."""
+    from app.expand import join_article
     from app.retrieval import fetch_article
     payloads = await asyncio.to_thread(fetch_article, doc_name, article)
-    payloads.sort(key=lambda p: str(p.get("clause", "")))
-    text = "\n\n".join(p.get("text", "") for p in payloads)
+    text, _ = join_article(payloads)  # parts in reading order, repeated header/overlap removed
     title = next((p.get("article_title", "") for p in payloads if p.get("article_title")), "")
     return ArticleResponse(doc_name=doc_name, doc_label=doc_label(doc_name), article=article,
                            article_title=title, found=bool(payloads), text=text)

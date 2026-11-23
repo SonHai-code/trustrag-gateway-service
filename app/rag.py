@@ -51,7 +51,7 @@ def extract_cited_ids(text: str, n_sources: int) -> list[int]:
 
 def to_citation(i: int, hit) -> Citation:
     p = hit.payload
-    text = p.get("text", "")
+    text = p.get("match_text") or p.get("text", "")  # expanded hits: show the part that matched, not the Điều's first lines
     return Citation(
         id=i,
         doc_name=p.get("doc_name", ""),

@@ -8,11 +8,12 @@ If the reranker is slow or down we log a warning and return the un-reranked orde
 import logging
 import time
 from concurrent.futures import ThreadPoolExecutor
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from functools import lru_cache
 
 from app import clients, settings
 from app.cache import TTLCache, normalize_query
+from app.expand import expandable, join_article
 
 log = logging.getLogger(__name__)
 RRF_K = 60
@@ -24,6 +25,7 @@ class RetrievalError(RuntimeError):
 
 _pool = ThreadPoolExecutor(max_workers=8, thread_name_prefix="qdrant")  # dense + BM25 searches run side by side
 _result_cache = TTLCache(maxsize=settings.RETRIEVAL_CACHE_SIZE, ttl=settings.RETRIEVAL_CACHE_TTL)
+_article_cache = TTLCache(maxsize=settings.RETRIEVAL_CACHE_SIZE, ttl=settings.RETRIEVAL_CACHE_TTL)  # (doc, article) -> chunks
 
 
 def cache_stats() -> dict:
@@ -33,6 +35,7 @@ def cache_stats() -> dict:
 def clear_caches() -> None:
     global _rerank_down_until
     _result_cache.clear()
+    _article_cache.clear()
     _rerank_down_until = 0.0
 
 
@@ -108,7 +111,8 @@ _rerank_down_until = 0.0  # circuit breaker: monotonic time until which the rera
 
 
 def _apply_rerank(question: str, hits: list[Hit]) -> list[Hit]:
-    scores = _rerank_scores(question, [h.payload.get("text", "") for h in hits])
+    # the context line (document > chapter > Điều) helps the cross-encoder just as it helps the embedding
+    scores = _rerank_scores(question, [(h.payload.get("context", "") + "\n" + h.payload.get("text", "")).strip() for h in hits])
     for h, s in zip(hits, scores):
         h.rerank, h.score = s, s
     return sorted(hits, key=lambda h: h.rerank, reverse=True)
@@ -117,15 +121,18 @@ def _apply_rerank(question: str, hits: list[Hit]) -> list[Hit]:
 # ---------- public API ----------
 
 def retrieve(question: str, top_k: int = 5, docs: list[str] | None = None,
-             mode: str | None = None, rerank: bool | None = None, timings: dict | None = None) -> list[Hit]:
+             mode: str | None = None, rerank: bool | None = None, timings: dict | None = None,
+             expand: bool | None = None) -> list[Hit]:
     """Blocking (network): run it in a thread from async code.
     `mode`/`rerank` override the settings (the baseline script uses them to compare configurations).
+    `expand` (default: settings.EXPAND_ARTICLES) replaces each hit by its whole Điều (small-to-big).
     `timings`, if given, is filled with per-stage milliseconds (embed_ms, vector_ms, rerank_ms) or cache=True."""
     mode = (mode or settings.SEARCH_MODE).lower()
     do_rerank = settings.RERANK if rerank is None else rerank
+    do_expand = settings.EXPAND_ARTICLES if expand is None else expand
     hybrid = mode == "hybrid"
     timings = timings if timings is not None else {}
-    key = (normalize_query(question), top_k, tuple(sorted(docs or [])), mode, do_rerank)
+    key = (normalize_query(question), top_k, tuple(sorted(docs or [])), mode, do_rerank, do_expand)
     cached = _result_cache.get(key)
     if cached is not None:
         timings["cache"] = True
@@ -162,13 +169,19 @@ def retrieve(question: str, top_k: int = 5, docs: list[str] | None = None,
                 log.warning("reranker unavailable, returning un-reranked results (skipping it for %.0fs): %s",
                             settings.RERANK_COOLDOWN, exc)
         timings["rerank_ms"] = _ms(t)
-    result = hits[:top_k]
+    if do_expand:
+        t = time.perf_counter()
+        hits = _one_hit_per_article(hits)  # several parts of one Điều would otherwise fill the top-k with duplicates
+        result = expand_hits(hits[:top_k])
+        timings["expand_ms"] = _ms(t)
+    else:
+        result = hits[:top_k]
     if not degraded:  # never cache a degraded ordering: the next search may have the reranker back
         _result_cache.set(key, list(result))
     return result
 
 
-def fetch_article(doc_name: str, article: str, limit: int = 20) -> list[dict]:
+def fetch_article(doc_name: str, article: str, limit: int = 64) -> list[dict]:
     """Exact lookup (no embedding): every chunk of 'Điều <article>' in one document, in stored order.
     Used when the question names the article ("Điều 5 Nghị định 399 quy định gì?")."""
     try:
@@ -181,6 +194,65 @@ def fetch_article(doc_name: str, article: str, limit: int = 20) -> list[dict]:
     except Exception as exc:
         raise RetrievalError(f"Qdrant unavailable or collection missing: {exc}") from exc
     return [p.payload or {} for p in points]
+
+
+def _article_key(payload: dict) -> tuple[str, str]:
+    return str(payload.get("doc_name", "")), str(payload.get("article", ""))
+
+
+def _one_hit_per_article(hits: list[Hit]) -> list[Hit]:
+    """Keep the best-ranked hit of every multi-part Điều (they will all be expanded to the same text anyway)."""
+    seen: set[tuple[str, str]] = set()
+    out: list[Hit] = []
+    for h in hits:
+        if expandable(h.payload):
+            key = _article_key(h.payload)
+            if key in seen:
+                continue
+            seen.add(key)
+        out.append(h)
+    return out
+
+
+def _siblings(key: tuple[str, str]) -> list[dict]:
+    cached = _article_cache.get(key)
+    if cached is not None:
+        return cached
+    parts = fetch_article(key[0], key[1])
+    _article_cache.set(key, parts)
+    return parts
+
+
+def expand_hits(hits: list[Hit]) -> list[Hit]:
+    """Small-to-big: a hit on one chunk of a long Điều becomes the whole Điều (the matched part is kept in
+    `match_text`, so citations still show what was actually found). A Điều that cannot be fetched stays as it is."""
+    wanted = [_article_key(h.payload) for h in hits if expandable(h.payload)]
+    if not wanted:
+        return list(hits)
+    fetched = dict(zip(wanted, _pool.map(_safe_siblings, wanted)))
+    budget = settings.EXPAND_TOTAL_CHARS
+    out: list[Hit] = []
+    for h in hits:
+        p = h.payload
+        parts = fetched.get(_article_key(p)) if expandable(p) else None
+        if not parts or len(parts) < 2:
+            out.append(h)
+            continue
+        own = len(p.get("text", ""))
+        limit = max(min(settings.EXPAND_MAX_CHARS, budget), own)
+        text, truncated = join_article(parts, p.get("part"), limit)
+        budget -= len(text)
+        out.append(replace(h, payload={**p, "text": text, "clause": "", "expanded": True, "truncated": truncated,
+                                       "match_text": p.get("text", ""), "match_clause": p.get("clause", "")}))
+    return out
+
+
+def _safe_siblings(key: tuple[str, str]) -> list[dict] | None:
+    try:
+        return _siblings(key)
+    except RetrievalError as exc:  # keep the small chunk rather than failing the search
+        log.warning("could not expand Điều %s of %s: %s", key[1], key[0], exc)
+        return None
 
 
 def list_documents() -> list[str]:

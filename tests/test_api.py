@@ -77,7 +77,7 @@ def test_search_flags_insufficient_evidence(client, monkeypatch):
 
 def test_articles_endpoint_joins_the_chunks_of_one_article(client, monkeypatch):
     from app import retrieval
-    monkeypatch.setattr(retrieval, "fetch_article", lambda doc, art, limit=20: [
+    monkeypatch.setattr(retrieval, "fetch_article", lambda doc, art, limit=20, section=0: [
         {"article_title": "Mức lương", "clause": "2", "text": "Điều 3. ...\nKhoản 2"},
         {"article_title": "Mức lương", "clause": "1", "text": "Điều 3. ...\nKhoản 1"},
     ])

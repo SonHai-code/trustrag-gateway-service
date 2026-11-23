@@ -15,7 +15,7 @@ from app import auth, models, rag, settings, userproxy
 from app.llm import LLMConfigError, LLMError
 from app.prompts import doc_label
 from app.retrieval import RetrievalError
-from app.schemas import AgentChatRequest, ArticleResponse, ChatRequest, ChatResponse, SearchRequest, SearchResponse
+from app.schemas import AgentChatRequest, ArticleResponse, ChatRequest, ChatResponse, OutlineResponse, SearchRequest, SearchResponse
 
 log = logging.getLogger(__name__)
 
@@ -184,13 +184,22 @@ async def search(req: SearchRequest):
     )
 
 
+@app.get("/documents/outline", response_model=OutlineResponse)
+async def document_outline(doc_name: str):
+    """Structure of one document: Điều per part, chapters, totals (no embedding, no LLM). Answers "how many Điều?"."""
+    from app.outline import build_outline
+    from app.retrieval import fetch_document_chunks
+    payloads = await asyncio.to_thread(fetch_document_chunks, doc_name)
+    return build_outline(doc_name, doc_label(doc_name), payloads)
+
+
 @app.get("/articles", response_model=ArticleResponse)
-async def article(doc_name: str, article: str):
+async def article(doc_name: str, article: str, section: int = 0):
     """Exact lookup of 'Điều <article>' in one document (no embedding, ~ms). Lets the agent answer
     questions that name the article directly."""
     from app.expand import join_article
     from app.retrieval import fetch_article
-    payloads = await asyncio.to_thread(fetch_article, doc_name, article)
+    payloads = await asyncio.to_thread(fetch_article, doc_name, article, 64, section)
     text, _ = join_article(payloads)  # parts in reading order, repeated header/overlap removed
     title = next((p.get("article_title", "") for p in payloads if p.get("article_title")), "")
     return ArticleResponse(doc_name=doc_name, doc_label=doc_label(doc_name), article=article,

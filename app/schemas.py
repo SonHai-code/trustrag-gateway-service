@@ -77,3 +77,29 @@ class ArticleResponse(BaseModel):
     article_title: str = ""
     found: bool
     text: str = ""
+
+
+class OutlineArticle(BaseModel):
+    article: str
+    title: str = ""
+    chapter: str = ""
+
+
+class OutlineSection(BaseModel):
+    section: int
+    title: str
+    count: int
+    first: str = ""
+    last: str = ""
+    chapters: list[str] = Field(default_factory=list)
+    articles: list[OutlineArticle] = Field(default_factory=list)
+
+
+class OutlineResponse(BaseModel):
+    doc_name: str
+    doc_label: str
+    found: bool
+    total_articles: int = 0
+    section_count: int = 0
+    numbering_restarts: bool = False
+    sections: list[OutlineSection] = Field(default_factory=list)

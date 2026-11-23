@@ -181,28 +181,55 @@ def retrieve(question: str, top_k: int = 5, docs: list[str] | None = None,
     return result
 
 
-def fetch_article(doc_name: str, article: str, limit: int = 64) -> list[dict]:
+def fetch_article(doc_name: str, article: str, limit: int = 64, section: int = 0) -> list[dict]:
     """Exact lookup (no embedding): every chunk of 'Điều <article>' in one document, in stored order.
-    Used when the question names the article ("Điều 5 Nghị định 399 quy định gì?")."""
+    Used when the question names the article ("Điều 5 Nghị định 399 quy định gì?").
+    A document can restart its numbering (a Quy chế attached to a Quyết định): `section` picks the part, 0 = main text.
+    Points ingested before sections existed have no `section` field and count as part 0."""
     try:
         from qdrant_client import models
-        flt = models.Filter(must=[
-            models.FieldCondition(key="doc_name", match=models.MatchValue(value=doc_name)),
-            models.FieldCondition(key="article", match=models.MatchValue(value=str(article))),
-        ])
+        must = [models.FieldCondition(key="doc_name", match=models.MatchValue(value=doc_name)),
+                models.FieldCondition(key="article", match=models.MatchValue(value=str(article)))]
+        must_not = []
+        if section > 0:
+            must.append(models.FieldCondition(key="section", match=models.MatchValue(value=int(section))))
+        else:
+            must_not.append(models.FieldCondition(key="section", range=models.Range(gt=0)))
+        flt = models.Filter(must=must, must_not=must_not or None)
         points, _ = _client().scroll(settings.COLLECTION, scroll_filter=flt, limit=limit, with_payload=True)
     except Exception as exc:
         raise RetrievalError(f"Qdrant unavailable or collection missing: {exc}") from exc
     return [p.payload or {} for p in points]
 
 
-def _article_key(payload: dict) -> tuple[str, str]:
-    return str(payload.get("doc_name", "")), str(payload.get("article", ""))
+def fetch_document_chunks(doc_name: str) -> list[dict]:
+    """The structural payload (no text) of every chunk of one document: the input of the outline."""
+    try:
+        from qdrant_client import models
+        flt = models.Filter(must=[models.FieldCondition(key="doc_name", match=models.MatchValue(value=doc_name))])
+        out: list[dict] = []
+        offset = None
+        while True:
+            points, offset = _client().scroll(settings.COLLECTION, scroll_filter=flt, limit=500, offset=offset,
+                                              with_payload=["doc_name", "article", "article_title", "chapter", "section", "section_title"])
+            out.extend(p.payload or {} for p in points)
+            if offset is None:
+                return out
+    except Exception as exc:
+        raise RetrievalError(f"Qdrant unavailable or collection missing: {exc}") from exc
+
+
+def _article_key(payload: dict) -> tuple[str, str, int]:
+    try:
+        section = int(payload.get("section") or 0)
+    except (TypeError, ValueError):
+        section = 0
+    return str(payload.get("doc_name", "")), str(payload.get("article", "")), section
 
 
 def _one_hit_per_article(hits: list[Hit]) -> list[Hit]:
     """Keep the best-ranked hit of every multi-part Điều (they will all be expanded to the same text anyway)."""
-    seen: set[tuple[str, str]] = set()
+    seen: set[tuple[str, str, int]] = set()
     out: list[Hit] = []
     for h in hits:
         if expandable(h.payload):
@@ -214,11 +241,11 @@ def _one_hit_per_article(hits: list[Hit]) -> list[Hit]:
     return out
 
 
-def _siblings(key: tuple[str, str]) -> list[dict]:
+def _siblings(key: tuple[str, str, int]) -> list[dict]:
     cached = _article_cache.get(key)
     if cached is not None:
         return cached
-    parts = fetch_article(key[0], key[1])
+    parts = fetch_article(key[0], key[1], section=key[2])
     _article_cache.set(key, parts)
     return parts
 
@@ -247,7 +274,7 @@ def expand_hits(hits: list[Hit]) -> list[Hit]:
     return out
 
 
-def _safe_siblings(key: tuple[str, str]) -> list[dict] | None:
+def _safe_siblings(key: tuple[str, str, int]) -> list[dict] | None:
     try:
         return _siblings(key)
     except RetrievalError as exc:  # keep the small chunk rather than failing the search

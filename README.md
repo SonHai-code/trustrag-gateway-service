@@ -16,6 +16,7 @@ question -> embedding service (dense + sparse query vectors)
 | `POST /chat/stream` | the same as Server-Sent Events: `sources`, `token`*, `done` |
 | `POST /search` | retrieval only; `include_text=true` returns full passages; `sufficient` / `best_score` say whether `/chat` would answer |
 | `GET /articles?doc_name=&article=` | exact lookup of one "Điều" (no embedding): used by the agent's `get_article` tool |
+| `GET /documents/outline?doc_name=` | structure of one document: Điều per numbered part, chapters, total (an index scroll, no embedding): used by the agent's `get_document_outline` tool |
 | `POST /agent/chat/stream` | forwards to the agent service (Phase 4) so the browser has one URL and one login; 503 if `AGENT_URL` is empty |
 | `GET /cache/stats` | hit/miss counters of the query-embedding, retrieval and answer caches |
 | `GET /documents` | `doc_name` values usable in the `docs` filter |

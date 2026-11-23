@@ -65,7 +65,7 @@ def world(monkeypatch):
     monkeypatch.setattr(retrieval, "_query", lambda using, vec, limit, flt: [
         _pt("c2", 0.9, FOUR[2]), _pt("s", 0.8, single), _pt("c0", 0.7, FOUR[0]), _pt("c3", 0.6, FOUR[3])])
     fetched = []
-    monkeypatch.setattr(retrieval, "fetch_article", lambda doc, art, limit=64: fetched.append((doc, art)) or list(FOUR))
+    monkeypatch.setattr(retrieval, "fetch_article", lambda doc, art, limit=64, section=0: fetched.append((doc, art)) or list(FOUR))
     retrieval.clear_caches()
     return fetched
 
@@ -99,7 +99,7 @@ def test_expansion_can_be_switched_off(world, monkeypatch):
 
 
 def test_failed_sibling_fetch_keeps_the_small_chunk(world, monkeypatch):
-    def boom(doc, art, limit=64):
+    def boom(doc, art, limit=64, section=0):
         raise retrieval.RetrievalError("qdrant down")
     monkeypatch.setattr(retrieval, "fetch_article", boom)
     retrieval.clear_caches()

@@ -199,7 +199,7 @@ async def article(doc_name: str, article: str, section: int = 0):
     questions that name the article directly."""
     from app.expand import join_article
     from app.retrieval import fetch_article
-    payloads = await asyncio.to_thread(fetch_article, doc_name, article, 64, section)
+    payloads = await asyncio.to_thread(fetch_article, doc_name, article, 128, section)
     text, _ = join_article(payloads)  # parts in reading order, repeated header/overlap removed
     title = next((p.get("article_title", "") for p in payloads if p.get("article_title")), "")
     return ArticleResponse(doc_name=doc_name, doc_label=doc_label(doc_name), article=article,

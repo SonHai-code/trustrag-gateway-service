@@ -181,25 +181,31 @@ def retrieve(question: str, top_k: int = 5, docs: list[str] | None = None,
     return result
 
 
-def fetch_article(doc_name: str, article: str, limit: int = 64, section: int = 0) -> list[dict]:
+def fetch_article(doc_name: str, article: str, limit: int = 128, section: int = 0) -> list[dict]:
     """Exact lookup (no embedding): every chunk of 'Điều <article>' in one document, in stored order.
     Used when the question names the article ("Điều 5 Nghị định 399 quy định gì?").
     A document can restart its numbering (a Quy chế attached to a Quyết định): `section` picks the part, 0 = main text.
-    Points ingested before sections existed have no `section` field and count as part 0."""
+    Points ingested before sections existed have no `section` field and count as part 0.
+    The part is chosen here, not in the Qdrant filter: only fields with a payload index (doc_name, article) may be filtered
+    on, and a filter on `section` is rejected ("Index required but not found") by collections without that index."""
     try:
         from qdrant_client import models
-        must = [models.FieldCondition(key="doc_name", match=models.MatchValue(value=doc_name)),
-                models.FieldCondition(key="article", match=models.MatchValue(value=str(article)))]
-        must_not = []
-        if section > 0:
-            must.append(models.FieldCondition(key="section", match=models.MatchValue(value=int(section))))
-        else:
-            must_not.append(models.FieldCondition(key="section", range=models.Range(gt=0)))
-        flt = models.Filter(must=must, must_not=must_not or None)
+        flt = models.Filter(must=[
+            models.FieldCondition(key="doc_name", match=models.MatchValue(value=doc_name)),
+            models.FieldCondition(key="article", match=models.MatchValue(value=str(article))),
+        ])
         points, _ = _client().scroll(settings.COLLECTION, scroll_filter=flt, limit=limit, with_payload=True)
     except Exception as exc:
         raise RetrievalError(f"Qdrant unavailable or collection missing: {exc}") from exc
-    return [p.payload or {} for p in points]
+    payloads = [p.payload or {} for p in points]
+    return [p for p in payloads if _section_of(p) == int(section)]
+
+
+def _section_of(payload: dict) -> int:
+    try:
+        return int(payload.get("section") or 0)
+    except (TypeError, ValueError):
+        return 0
 
 
 def fetch_document_chunks(doc_name: str) -> list[dict]:
@@ -220,11 +226,7 @@ def fetch_document_chunks(doc_name: str) -> list[dict]:
 
 
 def _article_key(payload: dict) -> tuple[str, str, int]:
-    try:
-        section = int(payload.get("section") or 0)
-    except (TypeError, ValueError):
-        section = 0
-    return str(payload.get("doc_name", "")), str(payload.get("article", "")), section
+    return str(payload.get("doc_name", "")), str(payload.get("article", "")), _section_of(payload)
 
 
 def _one_hit_per_article(hits: list[Hit]) -> list[Hit]:

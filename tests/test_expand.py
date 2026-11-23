@@ -137,3 +137,29 @@ def test_points_without_part_are_ordered_by_clause_and_none_dropped():
     old = [{"clause": "10", "text": "Điều 3. T\nK10"}, {"clause": "2", "text": "Điều 3. T\nK2"}, {"clause": "1", "text": "Điều 3. T\nK1"}]
     text, _ = join_article(old)
     assert text.index("K1") < text.index("K2") < text.index("K10")
+
+
+def test_fetch_article_never_filters_on_an_unindexed_field(monkeypatch):
+    """Qdrant rejects a filter on a field without a payload index (strict mode): the part is picked in Python."""
+    import sys, types
+    seen = {}
+    fake = types.SimpleNamespace(
+        Filter=lambda must=None, must_not=None: types.SimpleNamespace(must=must or [], must_not=must_not),
+        FieldCondition=lambda key, match=None, range=None: types.SimpleNamespace(key=key, match=match),
+        MatchValue=lambda value: value)
+    monkeypatch.setitem(sys.modules, "qdrant_client", types.SimpleNamespace(models=fake))
+
+    class P:
+        def __init__(self, payload):
+            self.payload = payload
+
+    class Client:
+        def scroll(self, collection, scroll_filter=None, limit=0, with_payload=True, offset=None):
+            seen["keys"] = sorted(c.key for c in scroll_filter.must)
+            seen["must_not"] = scroll_filter.must_not
+            return [P({"article": "1", "text": "main"}), P({"article": "1", "section": 1, "text": "quy che"})], None
+
+    monkeypatch.setattr(retrieval, "_client", lambda: Client())
+    assert seen == {} and [p["text"] for p in retrieval.fetch_article("d", "1")] == ["main"]
+    assert seen["keys"] == ["article", "doc_name"] and not seen["must_not"]
+    assert [p["text"] for p in retrieval.fetch_article("d", "1", section=1)] == ["quy che"]
